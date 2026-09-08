@@ -1,0 +1,7 @@
+stage,split,group,roc_auc,pr_auc,f1,n
+dp_federated_noise0_sanity_check,test,overall,0.640625,0.5663503642563745,0.2222222222222222,24
+dp_federated_noise0_sanity_check,test,stigma_sensitive,0.0,0.25,0.0,4
+dp_federated_noise0_sanity_check,test,non_sensitive,0.6923076923076923,0.6223594701038311,0.25,20
+dp_federated_tiered,test,overall,0.90625,0.8685897435897436,0.6666666666666666,24
+dp_federated_tiered,test,stigma_sensitive,1.0,1.0,0.0,4
+dp_federated_tiered,test,non_sensitive,0.8901098901098901,0.8500927643784786,0.7272727272727273,20
