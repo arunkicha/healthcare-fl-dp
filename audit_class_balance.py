@@ -1,22 +1,7 @@
-"""
-Cross-checks the stigma_sensitive / non_sensitive tier split against the outcome
-label (hospital_expire_flag = in-hospital mortality) that the model will actually
-predict. Critical check: confirms neither tier collapses to a single class
-(all-survived or all-died), which would make ROC-AUC/PR-AUC meaningless for that
-subgroup.
-
-ADMISSIONS.csv is per-admission; patient_tiers.csv (from audit_tier_mapping.py)
-is per-patient. Outcome is aggregated to patient level: died = 1 if ANY of their
-admissions has hospital_expire_flag == 1.
-
-Run from repo root (after audit_tier_mapping.py has produced data/processed/patient_tiers.csv):
-    python audit_class_balance.py
-"""
-
 import pandas as pd
 from pathlib import Path
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
 PROCESSED_DIR = Path("data/processed")
 
 
@@ -30,7 +15,7 @@ def main():
     tiers = pd.read_csv(tiers_path)
 
     adm = pd.read_csv(RAW_DIR / "ADMISSIONS.csv")
-    # Aggregate to patient level: died in any admission -> outcome = 1
+    adm.columns = adm.columns.str.lower()
     outcome = (
         adm.groupby("subject_id")["hospital_expire_flag"]
         .max()

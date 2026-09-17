@@ -1,18 +1,3 @@
-"""
-Centralized (non-federated, non-private) PyTorch MLP severity/mortality
-classifier. This is the accuracy ceiling -- federated.py and dp_federated.py
-reuse this exact architecture, just trained differently.
-
-Model inputs: demographics (gender, age) + 12 vital features.
-final_tier is NEVER a model input -- it's used only to report metrics broken
-down by tier, and later to set the DP noise budget per tier. Feeding tier
-into the model would leak the exact attribute the project is trying to
-protect.
-
-Run from repo root:
-    python -m src.models.baseline
-"""
-
 import pandas as pd
 import numpy as np
 import torch
@@ -36,10 +21,6 @@ np.random.seed(RANDOM_SEED)
 
 
 class MortalityMLP(nn.Module):
-    """Simple feedforward classifier. Same architecture reused by
-    federated.py (plain FedAvg) and dp_federated.py (FedAvg + Opacus DP-SGD),
-    so results across all three stages are comparable."""
-
     def __init__(self, n_features: int):
         super().__init__()
         self.net = nn.Sequential(
@@ -47,7 +28,7 @@ class MortalityMLP(nn.Module):
             nn.ReLU(),
             nn.Linear(32, 16),
             nn.ReLU(),
-            nn.Linear(16, 1),  # raw logit -- use BCEWithLogitsLoss
+            nn.Linear(16, 1),
         )
 
     def forward(self, x):
@@ -57,8 +38,7 @@ class MortalityMLP(nn.Module):
 def load_train_test():
     modeling_table = pd.read_csv(PROCESSED_DIR / "modeling_table.csv")
     split = pd.read_csv(PROCESSED_DIR / "train_test_split.csv")
-    df = modeling_table.merge(split, on="subject_id", how="inner")
-    return df
+    return modeling_table.merge(split, on="subject_id", how="inner")
 
 
 def standardize(X_train, X_test):
@@ -102,7 +82,6 @@ def main():
     train_df = df[df["split"] == "train"].reset_index(drop=True)
     test_df = df[df["split"] == "test"].reset_index(drop=True)
 
-    # Impute vitals using TRAIN medians only (avoid test-set leakage), encode gender
     X_train_df = train_df[["age"] + VITAL_FEATURES].copy()
     train_medians = X_train_df.median(numeric_only=True)
     X_train_df = X_train_df.fillna(train_medians)

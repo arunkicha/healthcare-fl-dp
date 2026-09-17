@@ -1,39 +1,25 @@
-"""
-Builds the final modeling table: one row per hospital admission (hadm_id), with:
-  - demographics: gender, age at admission
-  - outcome label: hospital_expire_flag (in-hospital mortality)
-  - privacy tier: stigma_sensitive / non_sensitive (from audit_tier_mapping.py)
-  - 12 vital-sign features, aggregated per admission using the CareVue/MetaVision
-    crosswalk validated in audit_vital_coverage.py
-
-Assumes patient_tiers.csv already exists (run audit_tier_mapping.py first).
-
-Run from repo root:
-    python -m src.data.dataset
-"""
-
 import pandas as pd
 from pathlib import Path
 from src.data.vital_itemid_crosswalk import VITAL_ITEMID_CROSSWALK
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
 PROCESSED_DIR = Path("data/processed")
+CHUNKSIZE = 2_000_000
 
-MAX_PLAUSIBLE_AGE = 90  # MIMIC convention: ages >89 are obscured via shifted DOB
+MAX_PLAUSIBLE_AGE = 90
 
-# Excluded as a non-representative outlier: subject_id 41976 has 15 admissions
-# (next highest stigma_sensitive patient has 3) and would dominate FedAvg
-# aggregation for the stigma_sensitive tier if included. Confirmed via
-# check_admission_outliers.py -- same exclusion logic as the mule-detection
-# project's single distorting-outlier bank client.
 EXCLUDED_PATIENTS = [41976]
 
 
 def load_demographics_and_outcome():
-    patients = pd.read_csv(RAW_DIR / "PATIENTS.csv", parse_dates=["dob"])
-    admissions = pd.read_csv(
-        RAW_DIR / "ADMISSIONS.csv", parse_dates=["admittime", "dischtime"]
-    )
+    patients = pd.read_csv(RAW_DIR / "PATIENTS.csv")
+    patients.columns = patients.columns.str.lower()
+    patients["dob"] = pd.to_datetime(patients["dob"])
+
+    admissions = pd.read_csv(RAW_DIR / "ADMISSIONS.csv")
+    admissions.columns = admissions.columns.str.lower()
+    admissions["admittime"] = pd.to_datetime(admissions["admittime"])
+    admissions["dischtime"] = pd.to_datetime(admissions["dischtime"])
 
     df = admissions.merge(
         patients[["subject_id", "gender", "dob"]], on="subject_id", how="left"
@@ -42,15 +28,7 @@ def load_demographics_and_outcome():
     age_years = (df["admittime"] - df["dob"]).dt.days / 365.25
     df["age"] = age_years.clip(upper=MAX_PLAUSIBLE_AGE).round(1)
 
-    return df[
-        [
-            "subject_id",
-            "hadm_id",
-            "gender",
-            "age",
-            "hospital_expire_flag",
-        ]
-    ]
+    return df[["subject_id", "hadm_id", "gender", "age", "hospital_expire_flag"]]
 
 
 def load_tiers():
@@ -71,30 +49,36 @@ def build_itemid_to_feature_map():
 
 
 def load_vital_features():
-    usecols = ["subject_id", "hadm_id", "itemid", "valuenum"]
-    chart = pd.read_csv(RAW_DIR / "CHARTEVENTS.csv", usecols=usecols, low_memory=False)
-
     itemid_to_feature = build_itemid_to_feature_map()
-    all_itemids = list(itemid_to_feature.keys())
+    all_itemids = set(itemid_to_feature.keys())
+    wanted = {"subject_id", "hadm_id", "itemid", "valuenum"}
 
-    chart = chart[chart["itemid"].isin(all_itemids)].copy()
-    chart["feature"] = chart["itemid"].map(itemid_to_feature)
-    chart = chart.dropna(subset=["valuenum"])
-
-    # Mean value per admission per feature -- simple, consistent aggregation
-    # across all 12 features (a few, like GCS components, are ordinal scores
-    # where mean is a coarse summary; revisit per-feature aggregation choice
-    # later if model performance suggests it's worth the extra complexity).
-    agg = (
-        chart.groupby(["hadm_id", "feature"])["valuenum"]
-        .mean()
-        .reset_index()
+    accum = None
+    reader = pd.read_csv(
+        RAW_DIR / "CHARTEVENTS.csv",
+        usecols=lambda c: c.lower() in wanted,
+        low_memory=False,
+        chunksize=CHUNKSIZE,
     )
+    for i, chunk in enumerate(reader):
+        chunk.columns = chunk.columns.str.lower()
+        chunk = chunk[chunk["itemid"].isin(all_itemids)].copy()
+        if chunk.empty:
+            print(f"  scanned chunk {i+1}, no relevant rows")
+            continue
+        chunk["feature"] = chunk["itemid"].map(itemid_to_feature)
+        chunk = chunk.dropna(subset=["valuenum"])
+        partial = (
+            chunk.groupby(["hadm_id", "feature"])["valuenum"]
+            .agg(sum="sum", count="count")
+        )
+        accum = partial if accum is None else accum.add(partial, fill_value=0)
+        print(f"  scanned chunk {i+1} ({(i+1)*CHUNKSIZE:,} rows)")
 
-    wide = agg.pivot(index="hadm_id", columns="feature", values="valuenum").reset_index()
+    accum["mean"] = accum["sum"] / accum["count"]
+    wide = accum["mean"].unstack("feature").reset_index()
     wide.columns.name = None
 
-    # Ensure all 12 expected feature columns exist even if one had zero rows
     for feature in VITAL_ITEMID_CROSSWALK.keys():
         if feature not in wide.columns:
             wide[feature] = pd.NA
@@ -109,6 +93,7 @@ def main():
     tiers = load_tiers()
     tiers = tiers[~tiers["subject_id"].isin(EXCLUDED_PATIENTS)]
 
+    print("Extracting vital-sign features from CHARTEVENTS (chunked)...")
     vitals = load_vital_features()
 
     df = demo_outcome.merge(tiers, on="subject_id", how="left")

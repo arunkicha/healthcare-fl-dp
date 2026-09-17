@@ -1,43 +1,3 @@
-"""
-Federated training + Opacus DP-SGD, with RISK-AWARE (tiered) noise allocation --
-the core novelty of the project. stigma_sensitive records get a tighter
-privacy budget (more noise) than non_sensitive records (less noise).
-
-Since each client's local data is a MIX of both tiers (by design -- see
-partition_clients.py), tiered DP is applied by splitting each client's local
-training into two sub-passes per round:
-  1. Train on that client's non_sensitive subset with LOW noise
-  2. Train on that client's stigma_sensitive subset with HIGH noise
-Both start from the same local copy of the current global model; the two
-resulting parameter sets are then averaged (weighted by subset size) into
-one local update per client, which is then combined via FedAvg as usual.
-
-This is a documented simplification given the small per-client tier
-subgroup sizes in this demo dataset -- see README for discussion.
-
-Runs TWO configurations x 5 random seeds each (same pattern as the
-mule-detection project's "replicated twice, so it's a genuine effect"
-discipline):
-  1. "noise0_sanity_check": both noise multipliers = 0 (clipping only, no
-     noise) -- confirms the DP wiring itself doesn't break anything,
-     independent of the actual privacy effect. Should closely match
-     federated.py's no-DP results.
-  2. "tiered": real tiered noise, using tiered_dp.py's configured values.
-
-Multi-seed repeats vary model initialization and Opacus's noise sampling
-(both driven by torch's RNG) while keeping the data split fixed, so we can
-tell whether an accuracy pattern is a real effect or a small-test-set fluke
-(n=24 test set, n=4 for stigma_sensitive -- highly sensitive to a single
-seed's luck).
-
-Also runs a loss-threshold membership inference attack (src/privacy/mia.py)
-on each config/seed's final global model, split by final_tier, as an
-empirical check on the privacy claim to report alongside epsilon.
-
-Run from repo root:
-    python -m src.models.dp_federated
-"""
-
 import pandas as pd
 import numpy as np
 import torch
@@ -45,16 +5,18 @@ import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 from pathlib import Path
 from sklearn.metrics import roc_auc_score, average_precision_score, f1_score
+from scipy import stats
 from opacus import PrivacyEngine
 
 from src.models.baseline import MortalityMLP, VITAL_FEATURES
 from src.privacy.tiered_dp import (
     NOISE_MULTIPLIER_STIGMA_SENSITIVE,
     NOISE_MULTIPLIER_NON_SENSITIVE,
+    NOISE_MULTIPLIER_FLAT,
     MAX_GRAD_NORM,
     DELTA,
 )
-from src.privacy.mia import run_mia_for_run  # <-- ADDED: loss-threshold MIA
+from src.privacy.mia import run_mia_for_run
 
 PROCESSED_DIR = Path("data/processed")
 RESULTS_DIR = Path("results/metrics")
@@ -63,10 +25,11 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 RANDOM_SEED = 42
 N_ROUNDS = 20
 LOCAL_EPOCHS = 5
-SEEDS = [42, 43, 44, 45, 46]  # multi-seed repeat to check result stability
+SEEDS = [42, 43, 44, 45, 46]
 
 CONFIGS = {
     "noise0_sanity_check": {"stigma": 0.0, "non_sensitive": 0.0},
+    "flat_dp": {"stigma": NOISE_MULTIPLIER_FLAT, "non_sensitive": NOISE_MULTIPLIER_FLAT},
     "tiered": {"stigma": NOISE_MULTIPLIER_STIGMA_SENSITIVE, "non_sensitive": NOISE_MULTIPLIER_NON_SENSITIVE},
 }
 
@@ -114,9 +77,6 @@ def weighted_average_params(params_list, weights):
 
 
 def train_dp_subset(base_params, X, y, noise_multiplier, n_features):
-    """Runs Opacus DP-SGD (full-batch) on one client's tier subset for
-    LOCAL_EPOCHS. Returns (updated_params, n_samples, epsilon_or_None).
-    Returns None if the subset is empty (nothing to train on)."""
     n = len(X)
     if n == 0:
         return None
@@ -127,7 +87,7 @@ def train_dp_subset(base_params, X, y, noise_multiplier, n_features):
     criterion = nn.BCEWithLogitsLoss()
 
     dataset = TensorDataset(X, y)
-    dataloader = DataLoader(dataset, batch_size=max(1, n // 4), shuffle=True)  # full-batch
+    dataloader = DataLoader(dataset, batch_size=max(1, n // 4), shuffle=True)
 
     privacy_engine = PrivacyEngine()
     model, optimizer, dataloader = privacy_engine.make_private(
@@ -227,7 +187,7 @@ def run_config(config_name, noise_stigma, noise_non_sensitive, train_df, X_train
                         last_epsilons[tier].append(epsilon)
 
             if not subset_results:
-                continue  # client had no data at all this round (shouldn't happen)
+                continue
 
             params_list = [r[0] for r in subset_results]
             weights = [r[1] for r in subset_results]
@@ -256,8 +216,35 @@ def run_config(config_name, noise_stigma, noise_non_sensitive, train_df, X_train
                 print(f"  {tier}: no epsilon reported (noise_multiplier was 0)")
 
     mean_epsilons = {tier: (np.mean(v) if v else None) for tier, v in last_epsilons.items()}
-    # CHANGED: also return the trained model so main() can run MIA against it
     return test_results, mean_epsilons, global_model
+
+
+def print_significance_tests(results_df):
+    print(f"\n{'='*70}\nSIGNIFICANCE TESTS (paired across {len(SEEDS)} seeds)\n{'='*70}")
+    baseline_stage = "dp_federated_noise0_sanity_check"
+    comparisons = [
+        (baseline_stage, "dp_federated_flat_dp"),
+        (baseline_stage, "dp_federated_tiered"),
+        ("dp_federated_flat_dp", "dp_federated_tiered"),
+    ]
+
+    for group in ["overall", "stigma_sensitive", "non_sensitive"]:
+        sub = results_df[results_df["group"] == group]
+        pivot = sub.pivot(index="seed", columns="stage", values="roc_auc")
+        print(f"\n--- group: {group} ---")
+        for a_stage, b_stage in comparisons:
+            if a_stage not in pivot.columns or b_stage not in pivot.columns:
+                continue
+            a_vals = pivot[a_stage].values
+            b_vals = pivot[b_stage].values
+            if len(a_vals) < 3:
+                continue
+            t_stat, t_p = stats.ttest_rel(a_vals, b_vals)
+            try:
+                w_stat, w_p = stats.wilcoxon(a_vals, b_vals)
+            except ValueError:
+                w_p = float("nan")
+            print(f"{a_stage} vs {b_stage}: paired t-test p={t_p:.4f}, Wilcoxon p={w_p:.4f}")
 
 
 def main():
@@ -278,21 +265,20 @@ def main():
     X_test = standardize(X_test, mean, std)
 
     tiers_test = test_df["final_tier"].to_numpy()
-    tiers_train = train_df["final_tier"].to_numpy()  # <-- ADDED: needed for MIA member-side subgroup split
+    tiers_train = train_df["final_tier"].to_numpy()
 
     all_rows = []
     epsilon_rows = []
-    all_mia_rows = []  # <-- ADDED
+    all_mia_rows = []
 
     for config_name, noise_cfg in CONFIGS.items():
         print(f"\n\n########## CONFIG: {config_name} -- running {len(SEEDS)} seeds ##########")
         for seed_idx, seed in enumerate(SEEDS):
             torch.manual_seed(seed)
             np.random.seed(seed)
-            verbose = (seed_idx == 0)  # full logging only for the first seed per config, to keep output readable
+            verbose = (seed_idx == 0)
 
             print(f"\n--- seed {seed} ---")
-            # CHANGED: now also capturing global_model
             test_results, mean_epsilons, global_model = run_config(
                 config_name, noise_cfg["stigma"], noise_cfg["non_sensitive"],
                 train_df, X_train_all, y_train_all, X_test, y_test, tiers_test, feature_cols,
@@ -303,8 +289,6 @@ def main():
             for tier, eps in mean_epsilons.items():
                 epsilon_rows.append({"stage": config_name, "seed": seed, "tier": tier, "epsilon": eps})
 
-            # ADDED: run the loss-threshold MIA against this seed's trained model,
-            # no retraining -- reuses global_model straight from run_config()
             mia_rows = run_mia_for_run(
                 global_model, X_train_all, y_train_all, tiers_train, X_test, y_test, tiers_test
             )
@@ -323,7 +307,6 @@ def main():
     epsilon_df = pd.DataFrame(epsilon_rows)
     epsilon_df.to_csv(RESULTS_DIR / "dp_federated_epsilons.csv", index=False)
 
-    # ADDED: save MIA results alongside the existing two CSVs
     mia_df = pd.DataFrame(all_mia_rows)
     mia_out_path = RESULTS_DIR / "mia_multiseed.csv"
     mia_df.to_csv(mia_out_path, index=False)
@@ -336,14 +319,15 @@ def main():
     )
     print(summary)
 
-    # ADDED: print the MIA stability summary the same way
     print(f"\n{'='*70}\nMIA STABILITY SUMMARY (mean +/- std across {len(SEEDS)} seeds)\n{'='*70}")
     mia_summary = (
-        mia_df.groupby(["stage", "subgroup"])[["attack_accuracy", "attack_auc", "n_members", "n_nonmembers"]]
+        mia_df.groupby(["stage", "subgroup"])[["attack_balanced_accuracy", "attack_auc", "n_members", "n_nonmembers"]]
         .agg(["mean", "std"])
         .round(4)
     )
     print(mia_summary)
+
+    print_significance_tests(results_df)
 
     print(f"\nSaved per-seed results to: {out_path}")
     print(f"Saved epsilon tracking to: {RESULTS_DIR / 'dp_federated_epsilons.csv'}")

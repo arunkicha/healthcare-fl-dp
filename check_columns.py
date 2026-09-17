@@ -1,11 +1,3 @@
-"""
-One-off diagnostic: prints the actual column names in DIAGNOSES_ICD.csv and D_ICD_DIAGNOSES.csv
-so we can fix audit_icd_coverage.py to match this mirror's schema.
-
-Run from repo root:
-    python check_columns.py
-"""
-
 import pandas as pd
 from pathlib import Path
 

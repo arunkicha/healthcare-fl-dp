@@ -1,48 +1,31 @@
-"""
-Checks how many DIAGNOSES_ICD rows match ICD-9 codes in our stigma-sensitivity mapping.
-
-Two-tier design (matches project goal: privacy-first for stigma-sensitive conditions,
-utility-first for everything else):
-  - stigma_sensitive: HIV/AIDS, substance use, mental health conditions
-  - non_sensitive: everything else (including clinically severe but non-stigmatizing
-    conditions like heart disease/diabetes, which are reported separately below for
-    context but do NOT get their own privacy tier)
-
-Note: this Kaggle mirror of the MIMIC-III demo uses lowercase snake_case column names.
-
-Run from repo root:
-    python audit_icd_coverage.py
-"""
-
 import pandas as pd
 from pathlib import Path
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
 
-# --- Stigma-sensitive tier: the ONLY tier that gets tightened privacy ---
 STIGMA_SENSITIVE_PREFIXES = [
-    "042",              # HIV/AIDS
-    "291", "292",       # substance-induced mental disorders
-    "303", "304", "305",  # alcohol/drug dependence & abuse
-    "295", "296", "298", "300", "301", "311",  # psychotic/mood/anxiety/personality disorders
+    "042",
+    "291", "292",
+    "303", "304", "305",
+    "295", "296", "298", "300", "301", "311",
 ]
 
-# --- Informational only: NOT a separate privacy tier, just reported for context ---
 CLINICALLY_SEVERE_NONSTIGMA_PREFIXES = [
-    "410", "411", "412", "413", "414",  # ischemic heart disease
-    "250",                               # diabetes mellitus
+    "410", "411", "412", "413", "414",
+    "250",
 ]
 
 
 def load_diagnoses():
     diag = pd.read_csv(RAW_DIR / "DIAGNOSES_ICD.csv")
+    diag.columns = diag.columns.str.lower()
     d_diag = pd.read_csv(RAW_DIR / "D_ICD_DIAGNOSES.csv")
+    d_diag.columns = d_diag.columns.str.lower()
 
-    diag["icd9_code"] = diag["icd9_code"].astype(str).str.strip()
-    d_diag["icd9_code"] = d_diag["icd9_code"].astype(str).str.strip()
+    diag["icd9_code"] = diag["icd9_code"].fillna("").astype(str).str.strip()
+    d_diag["icd9_code"] = d_diag["icd9_code"].fillna("").astype(str).str.strip()
 
-    merged = diag.merge(d_diag, on="icd9_code", how="left")
-    return merged
+    return diag.merge(d_diag, on="icd9_code", how="left")
 
 
 def matches_any(code: str, prefixes: list) -> bool:

@@ -1,17 +1,3 @@
-"""
-Risk-Aware Privacy Preservation for Real-Time Health Analytics in EHR Systems
-Working demo: Centralized baseline -> FedAvg -> Two-Tier DP-FedAvg
-
-NOTE ON DATA: This demo generates synthetic EHR-style records that mirror the
-structure of the project's real MIMIC-III Clinical Database Demo pipeline
-(12 crosswalked vital-sign features + stigma-sensitive flags, 100-patient
-scale, one deliberate outlier record). Real MIMIC-III data requires
-PhysioNet/CITI credentialing and is not bundled here, so this demo lets you
-show the actual mechanism (FedAvg, two-tier DP noise allocation, high-stigma-
-wins overlap rule, outlier exclusion) running end-to-end and producing
-results you can interpret the same way as the real experiments.
-"""
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -33,8 +19,6 @@ STIGMA_SENSITIVE_FEATURES = [
 ]
 ALL_FEATURES = NON_SENSITIVE_FEATURES + STIGMA_SENSITIVE_FEATURES
 
-
-# ----------------------------- Data generation -----------------------------
 
 def generate_synthetic_ehr(n_patients=100, seed=RNG_SEED_DEFAULT, include_outlier=True):
     rng = np.random.default_rng(seed)
@@ -64,8 +48,6 @@ def generate_synthetic_ehr(n_patients=100, seed=RNG_SEED_DEFAULT, include_outlie
 
     df = pd.concat([vitals, flags], axis=1)
 
-    # Build a risk label correlated with a mix of vitals + sensitive flags + noise,
-    # so both tiers carry genuine signal (mirrors a realistic risk-prediction task).
     risk_score = (
         0.03 * (df["heart_rate"] - 85)
         + 0.05 * (df["resp_rate"] - 18)
@@ -81,8 +63,6 @@ def generate_synthetic_ehr(n_patients=100, seed=RNG_SEED_DEFAULT, include_outlie
     df["high_risk"] = rng.binomial(1, prob)
 
     if include_outlier:
-        # Deliberate extreme outlier record, analogous to the excluded Subject ID
-        # in the real pipeline: implausible vitals that would distort FL aggregation.
         outlier = {f: 0 for f in ALL_FEATURES}
         outlier.update({
             "heart_rate": 220, "resp_rate": 48, "sbp": 240, "dbp": 140,
@@ -105,13 +85,9 @@ def standardize(train_df, test_df, feature_cols):
     return train_std.values, test_std.values
 
 
-# ----------------------------- Model training -----------------------------
-
 def fresh_model(n_features, seed):
     clf = SGDClassifier(loss="log_loss", penalty="l2", alpha=1e-4,
                          learning_rate="optimal", random_state=seed)
-    # Initialize weights via a single partial_fit call on tiny dummy data so
-    # coef_/intercept_ exist and can be manipulated before real training.
     dummy_X = np.zeros((2, n_features))
     dummy_y = np.array([0, 1])
     clf.partial_fit(dummy_X, dummy_y, classes=np.array([0, 1]))
@@ -124,8 +100,7 @@ def train_centralized(X_train, y_train, X_test, y_test, seed):
     clf = SGDClassifier(loss="log_loss", penalty="l2", alpha=1e-4,
                          max_iter=300, random_state=seed)
     clf.fit(X_train, y_train)
-    auc = roc_auc_score(y_test, clf.decision_function(X_test))
-    return auc
+    return roc_auc_score(y_test, clf.decision_function(X_test))
 
 
 def partition_clients(X, y, n_clients, seed):
@@ -143,7 +118,6 @@ def clip_update(delta, clip_norm):
 
 
 def gaussian_sigma(epsilon, delta, sensitivity):
-    # Standard Gaussian mechanism calibration.
     return (sensitivity / epsilon) * np.sqrt(2 * np.log(1.25 / delta))
 
 
@@ -162,7 +136,7 @@ def train_fedavg(X_train, y_train, X_test, y_test, n_clients, n_rounds, local_ep
 
         for (cx, cy) in clients:
             if len(np.unique(cy)) < 2:
-                continue  # skip clients without both classes this round
+                continue
             local_clf = fresh_model(n_features, seed)
             local_clf.coef_ = global_clf.coef_.copy()
             local_clf.intercept_ = global_clf.intercept_.copy()
@@ -172,13 +146,9 @@ def train_fedavg(X_train, y_train, X_test, y_test, n_clients, n_rounds, local_ep
 
             delta_coef = (local_clf.coef_ - global_clf.coef_).flatten()
             delta_intercept = local_clf.intercept_ - global_clf.intercept_
-
             delta_coef = clip_update(delta_coef, clip_norm)
 
             if dp_mode:
-                # Two-tier noise: stigma-sensitive feature weights get noise
-                # calibrated to a tighter (smaller) epsilon -> larger sigma.
-                # Non-sensitive weights use a looser epsilon -> smaller sigma.
                 sigma_sens = gaussian_sigma(eps_sensitive, delta, clip_norm)
                 sigma_nonsens = gaussian_sigma(eps_nonsensitive, delta, clip_norm)
                 noise = np.zeros_like(delta_coef)
@@ -204,8 +174,6 @@ def train_fedavg(X_train, y_train, X_test, y_test, n_clients, n_rounds, local_ep
     final_auc = history[-1] if history else 0.5
     return final_auc, history
 
-
-# ----------------------------- Streamlit UI -----------------------------
 
 st.title("Risk-Aware Privacy Preservation for Real-Time Health Analytics in EHR Systems")
 st.caption("Two-tier differential privacy for federated EHR risk prediction — working demo")
@@ -239,8 +207,6 @@ def get_data(seed, include_outlier):
 
 
 df = get_data(seed, include_outlier=not exclude_outlier and True)
-# When "exclude" is checked, we still generate the outlier but drop it before use,
-# so the toggle demonstrates the effect rather than never producing one.
 df_full = generate_synthetic_ehr(n_patients=100, seed=seed, include_outlier=True)
 if exclude_outlier:
     df_used = df_full.iloc[:-1].reset_index(drop=True)
@@ -270,9 +236,7 @@ with tab1:
         st.metric("Non-sensitive vitals", len(NON_SENSITIVE_FEATURES))
         st.metric("Stigma-sensitive features", len(STIGMA_SENSITIVE_FEATURES))
         st.metric("High-risk prevalence", f"{df_used['high_risk'].mean():.1%}")
-    st.markdown(
-        "**Non-sensitive tier:** " + ", ".join(NON_SENSITIVE_FEATURES)
-    )
+    st.markdown("**Non-sensitive tier:** " + ", ".join(NON_SENSITIVE_FEATURES))
     st.markdown(
         "**Stigma-sensitive tier (high-stigma-wins on any overlap):** "
         + ", ".join(STIGMA_SENSITIVE_FEATURES)
@@ -311,9 +275,9 @@ with tab3:
         c1, c2, c3 = st.columns(3)
         c1.metric("Centralized ROC-AUC", f"{r['cent_auc']:.3f}")
         c2.metric("FedAvg ROC-AUC", f"{r['fedavg_auc']:.3f}",
-                   delta=f"{r['fedavg_auc'] - r['cent_auc']:+.3f}")
+                  delta=f"{r['fedavg_auc'] - r['cent_auc']:+.3f}")
         c3.metric("Two-tier DP-FedAvg ROC-AUC", f"{r['dp_auc']:.3f}",
-                   delta=f"{r['dp_auc'] - r['fedavg_auc']:+.3f}")
+                  delta=f"{r['dp_auc'] - r['fedavg_auc']:+.3f}")
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(y=r["fedavg_hist"], mode="lines+markers", name="FedAvg (no DP)"))

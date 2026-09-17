@@ -1,20 +1,3 @@
-"""
-Federated training (plain FedAvg, no privacy) across the 10 simulated clients
-from partition_clients.py. Same MortalityMLP architecture as baseline.py, so
-results are directly comparable -- this stage tells us what federation alone
-costs in accuracy before any DP noise is added.
-
-Simulation approach: since this is a small dataset (99 patients, 10 clients),
-FL is simulated in-process (no real Flower server/client network) -- each
-"client" is just a data partition, and FedAvg is implemented manually as
-weighted parameter averaging after local training rounds. This keeps the
-demo fast and dependency-light while still faithfully implementing the
-FedAvg algorithm.
-
-Run from repo root:
-    python -m src.models.federated
-"""
-
 import copy
 import pandas as pd
 import numpy as np
@@ -30,8 +13,8 @@ RESULTS_DIR = Path("results/metrics")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 RANDOM_SEED = 42
-N_ROUNDS = 20          # federated communication rounds
-LOCAL_EPOCHS = 5       # local training epochs per client per round
+N_ROUNDS = 20
+LOCAL_EPOCHS = 5
 torch.manual_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
@@ -97,7 +80,6 @@ def set_flat_params(model, flat_params):
 
 
 def fedavg(client_params_list, client_weights):
-    """Weighted average of parameters across clients (weight = local sample count)."""
     total_weight = sum(client_weights)
     n_params = len(client_params_list[0])
     avg_params = []
@@ -127,7 +109,6 @@ def main():
 
     tiers_test = test_df["final_tier"].to_numpy()
 
-    # Split train data per client
     client_ids = sorted(train_df["client_id"].dropna().unique())
     client_data = {}
     for cid in client_ids:
@@ -182,7 +163,6 @@ def main():
     out_df.to_csv(out_path, index=False)
     print(f"\nSaved results to: {out_path}")
 
-    # Quick comparison vs centralized baseline, if it exists
     baseline_path = RESULTS_DIR / "centralized_baseline.csv"
     if baseline_path.exists():
         baseline_df = pd.read_csv(baseline_path)

@@ -1,22 +1,7 @@
-"""
-Resolves per-patient privacy tier from DIAGNOSES_ICD.csv using the two-tier design:
-  - stigma_sensitive: patient has ANY diagnosis in the stigma-sensitive code list
-                       (HIV/AIDS, substance use, mental health) -> tighter DP budget
-  - non_sensitive:    everyone else (including heart disease/diabetes and all
-                       generic ICU comorbidities) -> looser DP budget, utility-first
-
-This is a strict two-category split: "stigma-sensitive wins" if present at all;
-there is no medium/third tier by design (see README for rationale -- kept as a
-noted future-work extension, not implemented now given dataset size).
-
-Run from repo root:
-    python audit_tier_mapping.py
-"""
-
 import pandas as pd
 from pathlib import Path
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
 PROCESSED_DIR = Path("data/processed")
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -35,10 +20,16 @@ def is_stigma_sensitive(code: str) -> bool:
 
 def main():
     diag = pd.read_csv(RAW_DIR / "DIAGNOSES_ICD.csv")
-    diag["icd9_code"] = diag["icd9_code"].astype(str).str.strip()
+    diag.columns = diag.columns.str.lower()
+    diag["icd9_code"] = diag["icd9_code"].fillna("").astype(str).str.strip()
+
+    n_missing_code = (diag["icd9_code"] == "").sum()
+    if n_missing_code:
+        print(f"NOTE: {n_missing_code} diagnosis rows have no ICD-9 code -- "
+              f"treated as non_sensitive by default.\n")
+
     diag["is_stigma_sensitive"] = diag["icd9_code"].apply(is_stigma_sensitive)
 
-    # Per patient: do they have ANY stigma-sensitive diagnosis at all?
     patient_flags = (
         diag.groupby("subject_id")["is_stigma_sensitive"]
         .any()

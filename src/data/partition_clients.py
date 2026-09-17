@@ -1,21 +1,3 @@
-"""
-Partitions patients into N simulated FL clients, stratified by privacy tier
-(stigma_sensitive / non_sensitive), so every client gets a near-even share of
-both tiers. A naive random split risks some clients getting zero
-stigma_sensitive patients given how few there are (23/100) -- this avoids that.
-
-Partitions by subject_id (patient), NOT hadm_id (admission), so a patient's
-multiple admissions always stay together in the same client -- prevents
-patient leakage across clients.
-
-Note: this is a stratified near-IID split by design, not a fully realistic
-non-IID hospital simulation -- a deliberate tradeoff given the small tier
-sizes in this demo dataset. Document this as a known limitation.
-
-Run from repo root:
-    python -m src.data.partition_clients
-"""
-
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -24,7 +6,6 @@ PROCESSED_DIR = Path("data/processed")
 N_CLIENTS = 10
 RANDOM_SEED = 42
 
-# Keep in sync with EXCLUDED_PATIENTS in src/data/dataset.py
 EXCLUDED_PATIENTS = [41976]
 
 
@@ -42,7 +23,6 @@ def main():
     for tier_name, group in tiers.groupby("final_tier"):
         subject_ids = group["subject_id"].to_numpy().copy()
         rng.shuffle(subject_ids)
-        # Round-robin assignment within this tier across all N_CLIENTS
         client_ids = np.arange(len(subject_ids)) % N_CLIENTS
         for sid, cid in zip(subject_ids, client_ids):
             assignments.append({"subject_id": sid, "final_tier": tier_name, "client_id": int(cid)})

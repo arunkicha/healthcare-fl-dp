@@ -1,18 +1,3 @@
-"""
-Splits patients into train/test sets, stratified by (tier x outcome) so the
-test set has representation of both outcome classes in BOTH tiers -- critical
-for the stigma_sensitive tier given how few patients (22) it has.
-
-Splits by subject_id (patient), NOT hadm_id, so a patient's admissions all
-land in the same split -- no leakage.
-
-Patient-level outcome for stratification purposes = died in ANY of their
-admissions (same aggregation logic as audit_class_balance.py).
-
-Run from repo root:
-    python -m src.data.train_test_split
-"""
-
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -21,7 +6,6 @@ PROCESSED_DIR = Path("data/processed")
 TEST_FRACTION = 0.2
 RANDOM_SEED = 42
 
-# Keep in sync with EXCLUDED_PATIENTS in dataset.py / partition_clients.py
 EXCLUDED_PATIENTS = [41976]
 
 
@@ -29,7 +13,6 @@ def main():
     modeling_table = pd.read_csv(PROCESSED_DIR / "modeling_table.csv")
     modeling_table = modeling_table[~modeling_table["subject_id"].isin(EXCLUDED_PATIENTS)]
 
-    # Patient-level outcome: died in any admission
     patient_outcome = (
         modeling_table.groupby("subject_id")["hospital_expire_flag"].max().reset_index()
     )
@@ -49,7 +32,6 @@ def main():
 
         n = len(subject_ids)
         n_test = max(1, round(n * TEST_FRACTION)) if n >= 2 else 0
-        # never let a stratum go fully into test (train needs at least 1 too)
         n_test = min(n_test, n - 1) if n >= 2 else 0
 
         test_ids = subject_ids[:n_test]

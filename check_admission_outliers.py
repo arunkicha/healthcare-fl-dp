@@ -1,12 +1,3 @@
-"""
-One-off diagnostic: finds which specific patient(s) are driving client 4's
-28-admission outlier, by checking per-patient admission counts among
-stigma_sensitive patients.
-
-Run from repo root:
-    python check_admission_outliers.py
-"""
-
 import pandas as pd
 from pathlib import Path
 

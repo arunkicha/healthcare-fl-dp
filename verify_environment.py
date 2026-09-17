@@ -1,11 +1,3 @@
-"""
-Checks that all packages needed for baseline.py (and the later federated.py /
-dp_federated.py stages) are installed, and prints versions for reference.
-
-Run from repo root (any directory actually -- doesn't touch data):
-    python verify_environment.py
-"""
-
 import importlib
 import sys
 

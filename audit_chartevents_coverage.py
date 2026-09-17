@@ -1,35 +1,26 @@
-"""
-Audits CHARTEVENTS.csv to find which itemids (vitals/observations) are common
-enough across patients to use as model features, before building the full
-feature-extraction logic in dataset.py.
-
-CHARTEVENTS is itemid-coded -- decodes via D_ITEMS.csv (label, category, unit).
-Most of the hundreds of possible itemids are sparsely recorded; this script
-finds the ones with broad patient coverage, which are the only ones worth
-using as structured features.
-
-Run from repo root:
-    python audit_chartevents_coverage.py
-"""
-
 import pandas as pd
 from pathlib import Path
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
 
 
 def main():
     print("Loading CHARTEVENTS.csv (this is the largest file, may take a moment)...")
-    usecols = ["subject_id", "hadm_id", "itemid", "valuenum", "valueuom"]
-    chart = pd.read_csv(RAW_DIR / "CHARTEVENTS.csv", usecols=usecols, low_memory=False)
+    wanted = {"subject_id", "hadm_id", "itemid", "valuenum", "valueuom"}
+    chart = pd.read_csv(
+        RAW_DIR / "CHARTEVENTS.csv",
+        usecols=lambda c: c.lower() in wanted,
+        low_memory=False,
+    )
+    chart.columns = chart.columns.str.lower()
 
     d_items = pd.read_csv(RAW_DIR / "D_ITEMS.csv")
+    d_items.columns = d_items.columns.str.lower()
 
     total_patients = chart["subject_id"].nunique()
     print(f"Total patients in CHARTEVENTS: {total_patients}")
     print(f"Total chartevent rows: {len(chart)}\n")
 
-    # Coverage per itemid: how many distinct patients have this measurement at all
     coverage = (
         chart.groupby("itemid")["subject_id"]
         .nunique()
@@ -46,10 +37,8 @@ def main():
     coverage = coverage.sort_values("n_patients", ascending=False)
 
     print("--- Top 40 itemids by patient coverage ---")
-    print(
-        coverage.head(40)[["itemid", "label", "category", "unitname", "n_patients", "pct_patients"]]
-        .to_string(index=False)
-    )
+    cols = ["itemid", "label", "category", "unitname", "n_patients", "pct_patients"]
+    print(coverage.head(40)[cols].to_string(index=False))
 
     print("\n--- Coverage thresholds ---")
     for pct in [90, 75, 50, 25]:

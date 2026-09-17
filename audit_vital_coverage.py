@@ -1,37 +1,45 @@
-"""
-Validates VITAL_ITEMID_CROSSWALK against real CHARTEVENTS.csv coverage:
-for each vital, reports patient coverage using ONLY the CareVue itemid,
-ONLY the MetaVision itemid, and the COMBINED (coalesced) coverage.
-
-This confirms the crosswalk pairings are correct and complete BEFORE
-they're used in dataset.py's feature extraction -- a wrong or missing
-itemid here would silently produce a feature that's mostly null for
-half the patients.
-
-Run from repo root:
-    python audit_vital_coverage.py
-"""
-
 import pandas as pd
 from pathlib import Path
 from src.data.vital_itemid_crosswalk import VITAL_ITEMID_CROSSWALK
 
-RAW_DIR = Path("data/raw/mimic-iii-clinical-database-demo-1.4")
+RAW_DIR = Path("data/raw/mimic-iii-clinical-database-1.4")
+CHUNKSIZE = 2_000_000
 
 
 def main():
-    usecols = ["subject_id", "itemid"]
-    chart = pd.read_csv(RAW_DIR / "CHARTEVENTS.csv", usecols=usecols, low_memory=False)
-    total_patients = chart["subject_id"].nunique()
+    all_itemids = set()
+    for itemids in VITAL_ITEMID_CROSSWALK.values():
+        all_itemids.update(itemids)
 
-    print(f"Total patients in CHARTEVENTS: {total_patients}\n")
+    wanted = {"subject_id", "itemid"}
+    total_patients_seen = set()
+    itemid_to_patients = {item: set() for item in all_itemids}
+
+    reader = pd.read_csv(
+        RAW_DIR / "CHARTEVENTS.csv",
+        usecols=lambda c: c.lower() in wanted,
+        low_memory=False,
+        chunksize=CHUNKSIZE,
+    )
+    for i, chunk in enumerate(reader):
+        chunk.columns = chunk.columns.str.lower()
+        total_patients_seen.update(chunk["subject_id"].unique())
+        relevant = chunk[chunk["itemid"].isin(all_itemids)]
+        for item, group in relevant.groupby("itemid"):
+            itemid_to_patients[item].update(group["subject_id"].unique())
+        print(f"  scanned chunk {i+1} ({(i+1)*CHUNKSIZE:,} rows)")
+
+    total_patients = len(total_patients_seen)
+    print(f"\nTotal patients in CHARTEVENTS: {total_patients}\n")
     print(f"{'feature':<18} {'itemids':<30} {'combined_n':<12} {'combined_pct':<12}")
     print("-" * 75)
 
     results = []
     for feature, itemids in VITAL_ITEMID_CROSSWALK.items():
-        subset = chart[chart["itemid"].isin(itemids)]
-        n_combined = subset["subject_id"].nunique()
+        combined_patients = set()
+        for item in itemids:
+            combined_patients |= itemid_to_patients[item]
+        n_combined = len(combined_patients)
         pct_combined = 100 * n_combined / total_patients
         results.append((feature, itemids, n_combined, pct_combined))
         print(f"{feature:<18} {str(itemids):<30} {n_combined:<12} {pct_combined:<12.1f}")
@@ -40,7 +48,7 @@ def main():
     for feature, itemids, n_combined, pct_combined in results:
         print(f"\n{feature}:")
         for item in itemids:
-            n = chart.loc[chart["itemid"] == item, "subject_id"].nunique()
+            n = len(itemid_to_patients[item])
             flag = "  <- contributes 0, check this itemid" if n == 0 else ""
             print(f"    itemid {item}: {n} patients{flag}")
 

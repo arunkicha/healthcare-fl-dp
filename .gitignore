@@ -1,9 +1,7 @@
-data/raw/*.csv
 data/raw/**/*.csv
+data/raw/**/*.gz
 data/processed/
 venv/
 __pycache__/
 *.pyc
 .DS_Store
-"data/raw/*.csv" 
-"data/processed/*.csv" 
