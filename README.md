@@ -152,7 +152,7 @@ No MIMIC-III data, derived patient-level tables or credentials are included in t
 
 ## Author
 
-Arunkumaran A, VIT Chennai (CSE4068).
+Arunkumaran A, VIT Chennai.
 
 ## License
 
