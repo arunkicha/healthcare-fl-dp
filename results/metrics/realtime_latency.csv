@@ -1,0 +1,2 @@
+model,n_scored,latency_p50_ms,latency_p95_ms,latency_p99_ms,latency_max_ms,stream_throughput_per_s,batch_throughput_per_s,budget_ms,within_budget_pct,max_abs_stream_vs_batch_diff,auc_on_stream,high_risk_alert_rate_pct
+tiered,2000,0.08420000085607171,0.12681999960477694,0.19113099995593072,0.4994000009901356,10968.291766476868,510360.3144919422,100.0,100.0,2.384185791015625e-07,0.8635514925192173,6.2

@@ -1,5 +1,7 @@
 stage,tier,mean,std
+flat_dp,non_sensitive,27.532352677241487,0.0
+flat_dp,stigma_sensitive,27.532352677241487,0.0
 noise0_sanity_check,non_sensitive,,
 noise0_sanity_check,stigma_sensitive,,
-tiered,non_sensitive,77.27949060788839,0.0
-tiered,stigma_sensitive,10.165470893895352,0.0
+tiered,non_sensitive,27.532352677241487,0.0
+tiered,stigma_sensitive,7.465732830699233,0.0

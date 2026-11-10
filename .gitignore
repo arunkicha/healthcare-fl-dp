@@ -1,7 +1,21 @@
-data/raw/**/*.csv
-data/raw/**/*.gz
-data/processed/
+# Restricted data: never commit (anchored so src/data/ code is NOT ignored)
+/data/*
+!/data/README.md
+*.csv.gz
+*.parquet
+
+# Python
 venv/
+.venv/
+env/
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
+
+# OS / editor
 .DS_Store
+Thumbs.db
+.vscode/
+
+# Optional: keep the non-private comparison model out of the public repo
+# models/noise0_sanity_check/

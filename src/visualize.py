@@ -1,3 +1,5 @@
+"""Builds result figures and summary tables from results/metrics/*.csv."""
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -119,8 +121,8 @@ def plot_epsilon_by_tier(epsilons):
     plt.close(fig)
 
 
-def plot_mia_attack_accuracy(mia):
-    summary = mia.groupby(["stage", "subgroup"])["attack_accuracy"].agg(["mean", "std"]).reset_index()
+def plot_mia_attack_balanced_accuracy(mia):
+    summary = mia.groupby(["stage", "subgroup"])["attack_balanced_accuracy"].agg(["mean", "std"]).reset_index()
     stages = summary["stage"].unique()
 
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -139,8 +141,8 @@ def plot_mia_attack_accuracy(mia):
 
     ax.set_xticks(list(x))
     ax.set_xticklabels(stages)
-    ax.set_ylabel("Attack accuracy")
-    ax.set_title("Membership inference attack accuracy, by stage and tier")
+    ax.set_ylabel("Attack balanced accuracy")
+    ax.set_title("Membership inference attack balanced accuracy, by stage and tier")
     ax.axhline(0.5, color="gray", linestyle="--", linewidth=1, label="chance level")
     ax.legend()
     fig.tight_layout()
@@ -155,7 +157,7 @@ def save_summary_tables(summary, epsilons, mia):
     eps_summary.to_csv(RESULTS_DIR / "summary_epsilon_by_tier.csv", index=False)
 
     mia_summary = mia.groupby(["stage", "subgroup"])[
-        ["attack_accuracy", "attack_auc", "n_members", "n_nonmembers"]
+        ["attack_balanced_accuracy", "attack_auc", "n_members", "n_nonmembers"]
     ].agg(["mean", "std"])
     mia_summary.to_csv(RESULTS_DIR / "summary_mia_by_stage.csv")
 
@@ -167,7 +169,7 @@ def main():
     plot_stage_comparison(summary)
     plot_multiseed_stability(dp_multiseed)
     plot_epsilon_by_tier(epsilons)
-    plot_mia_attack_accuracy(mia)
+    plot_mia_attack_balanced_accuracy(mia)
     save_summary_tables(summary, epsilons, mia)
 
     print(f"Figures saved to: {FIGURES_DIR}")

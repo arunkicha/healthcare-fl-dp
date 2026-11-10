@@ -1,0 +1,35 @@
+{
+  "config": "noise0_sanity_check",
+  "noise_multiplier_stigma_sensitive": 0.0,
+  "noise_multiplier_non_sensitive": 0.0,
+  "max_grad_norm": 1.0,
+  "delta": 1e-05,
+  "epsilon_per_round": {
+    "stigma_sensitive": null,
+    "non_sensitive": null
+  },
+  "note": "epsilon_per_round covers one round of local training; cumulative epsilon over all rounds is larger",
+  "test_metrics": {
+    "overall": {
+      "roc_auc": 0.8855442202802817,
+      "pr_auc": 0.6515420487947955,
+      "f1": 0.56188831318365,
+      "n": 11868
+    },
+    "stigma_sensitive": {
+      "roc_auc": 0.8707981048836838,
+      "pr_auc": 0.5846389227596782,
+      "f1": 0.5297297297297298,
+      "n": 3394
+    },
+    "non_sensitive": {
+      "roc_auc": 0.8896437279918918,
+      "pr_auc": 0.6711859914607464,
+      "f1": 0.570592538405267,
+      "n": 8474
+    }
+  },
+  "n_train": 47093,
+  "exported": "2026-10-16",
+  "seed": 42
+}

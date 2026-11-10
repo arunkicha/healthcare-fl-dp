@@ -1,9 +1,9 @@
-flwr
-opacus
-torch
-pandas
 numpy
+pandas
+scipy
 scikit-learn
 matplotlib
-streamlit
 plotly
+streamlit>=1.50
+torch
+opacus
